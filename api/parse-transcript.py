@@ -3,55 +3,48 @@ import json
 import io
 import cgi
 import re
-import base64
+from http.server import BaseHTTPRequestHandler
 import pdfplumber
 
-def handler(event, context):
-    method = event['httpMethod']
-    path = event['path']
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != '/api/parse-transcript':
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(b"""<!doctype html> <html><body> <h3>Upload a transcript PDF</h3> <form method="POST" enctype="multipart/form-data" action="/api/parse-transcript"> <input type="file" name="pdf" accept="application/pdf" /> <button type="submit">Upload</button> </form> </body></html>""")
 
-    if path != '/api/parse-transcript':
-        return {'statusCode': 404, 'body': ''}
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
 
-    if method == 'GET':
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'text/html; charset=utf-8'},
-            'body': """<!doctype html> <html><body> <h3>Upload a transcript PDF</h3> <form method="POST" enctype="multipart/form-data" action="/api/parse-transcript"> <input type="file" name="pdf" accept="application/pdf" /> <button type="submit">Upload</button> </form> </body></html> """
+    def do_POST(self):
+        if self.path != '/api/parse-transcript':
+            self.send_response(404)
+            self.end_headers()
+            return
+        content_length = int(self.headers['Content-Length'])
+        body = self.rfile.read(content_length)
+        environ = {
+            'REQUEST_METHOD': 'POST',
+            'CONTENT_TYPE': self.headers.get('Content-Type', ''),
+            'CONTENT_LENGTH': str(content_length),
         }
-
-    elif method == 'OPTIONS':
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-            },
-            'body': ''
-        }
-
-    elif method == 'POST':
+        form = cgi.FieldStorage(fp=io.BytesIO(body), environ=environ, keep_blank_values=True)
+        if 'pdf' not in form or not form['pdf'].file:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'No PDF provided'}).encode('utf-8'))
+            return
+        pdf_bytes = form['pdf'].file.read()
         try:
-            content_type = event['headers'].get('content-type', event['headers'].get('Content-Type', ''))
-            body = base64.b64decode(event['body']) if event.get('isBase64Encoded', False) else event['body'].encode('utf-8')
-            fp = io.BytesIO(body)
-            environ = {
-                'REQUEST_METHOD': 'POST',
-                'CONTENT_TYPE': content_type,
-                'CONTENT_LENGTH': str(len(body)),
-            }
-            form = cgi.FieldStorage(fp=fp, environ=environ, keep_blank_values=True)
-
-            if 'pdf' not in form or not form['pdf'].file:
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'application/json; charset=utf-8'},
-                    'body': json.dumps({'error': 'No PDF provided'})
-                }
-
-            pdf_bytes = form['pdf'].file.read()
-
             courses = []
             total_credits = None
             gpa = None
@@ -96,20 +89,13 @@ def handler(event, context):
             if gpa_match:
                 gpa = float(gpa_match.group(1).replace(',', '.'))
             response_data = {'gpa': gpa, 'total_credits': total_credits, 'courses': courses}
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json; charset=utf-8',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps(response_data, ensure_ascii=False)
-            }
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
-            return {
-                'statusCode': 500,
-                'headers': {'Content-Type': 'application/json; charset=utf-8'},
-                'body': json.dumps({'error': str(e)})
-            }
-
-    else:
-        return {'statusCode': 405, 'body': 'Method Not Allowed'}
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
