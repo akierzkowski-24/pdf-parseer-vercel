@@ -1,20 +1,5 @@
 {
-    "version": 2,
-    "builds": [
-      {
-        "src": "api/parse-transcript.py",
-        "use": "@vercel/python"
-      }
-    ],
-    "routes": [
-      {
-        "src": "/api/parse-transcript",
-        "dest": "api/parse-transcript.py"
-      }
-    ],
-    "functions": {
-      "api/parse-transcript.py": {
-        "runtime": "python3.10"
-      }
-    }
-  }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/parser" }
+  ]
+}
