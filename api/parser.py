@@ -1,44 +1,47 @@
-# api/parser.py
 import json
 import io
 import cgi
 import re
-from http.server import BaseHTTPRequestHandler
 import pdfplumber
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Remove the path check to allow rewritten requests
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(b"""<!doctype html> <html><body> <h3>Upload a transcript PDF</h3> <form method="POST" enctype="multipart/form-data" action="/api/parser"> <input type="file" name="pdf" accept="application/pdf" /> <button type="submit">Upload</button> </form> </body></html>""")
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-
-    def do_POST(self):
-        # Remove the path check to allow rewritten requests
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
-        environ = {
-            'REQUEST_METHOD': 'POST',
-            'CONTENT_TYPE': self.headers.get('Content-Type', ''),
-            'CONTENT_LENGTH': str(content_length),
-        }
-        form = cgi.FieldStorage(fp=io.BytesIO(body), environ=environ, keep_blank_values=True)
-        if 'pdf' not in form or not form['pdf'].file:
-            self.send_response(400)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': 'No PDF provided'}).encode('utf-8'))
-            return
-        pdf_bytes = form['pdf'].file.read()
-        try:
+def handler(request):
+    try:
+        if request.method == 'OPTIONS':
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+                },
+                'body': ''
+            }
+        
+        if request.method == 'GET':
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'text/html; charset=utf-8'},
+                'body': """<!doctype html> <html><body> <h3>Upload a transcript PDF</h3> <form method="POST" enctype="multipart/form-data" action="/api/parser"> <input type="file" name="pdf" accept="application/pdf" /> <button type="submit">Upload</button> </form> </body></html>"""
+            }
+        
+        if request.method == 'POST':
+            # Streamed parsing using Vercel's request.body_file
+            form = cgi.FieldStorage(
+                fp=request.body_file,
+                headers=request.headers,
+                environ={
+                    'REQUEST_METHOD': 'POST',
+                    'CONTENT_TYPE': request.headers.get('Content-Type', ''),
+                },
+                keep_blank_values=True
+            )
+            if 'pdf' not in form or not form['pdf'].file:
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'application/json; charset=utf-8'},
+                    'body': json.dumps({'error': 'No PDF provided'})
+                }
+            pdf_bytes = form['pdf'].file.read()
             courses = []
             total_credits = None
             gpa = None
@@ -83,13 +86,17 @@ class handler(BaseHTTPRequestHandler):
             if gpa_match:
                 gpa = float(gpa_match.group(1).replace(',', '.'))
             response_data = {'gpa': gpa, 'total_credits': total_credits, 'courses': courses}
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps(response_data, ensure_ascii=False)
+            }
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json; charset=utf-8'},
+            'body': json.dumps({'error': str(e)})
+        }
