@@ -1,4 +1,3 @@
-# api/parser.py
 import json
 import io
 import cgi
@@ -8,7 +7,6 @@ import pdfplumber
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Remove the path check to allow rewritten requests
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.end_headers()
@@ -22,23 +20,24 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        # Remove the path check to allow rewritten requests
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
-        environ = {
-            'REQUEST_METHOD': 'POST',
-            'CONTENT_TYPE': self.headers.get('Content-Type', ''),
-            'CONTENT_LENGTH': str(content_length),
-        }
-        form = cgi.FieldStorage(fp=io.BytesIO(body), environ=environ, keep_blank_values=True)
-        if 'pdf' not in form or not form['pdf'].file:
-            self.send_response(400)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': 'No PDF provided'}).encode('utf-8'))
-            return
-        pdf_bytes = form['pdf'].file.read()
         try:
+            # Streamed parsing using self.rfile
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    'REQUEST_METHOD': 'POST',
+                    'CONTENT_TYPE': self.headers.get('Content-Type', ''),
+                },
+                keep_blank_values=True
+            )
+            if 'pdf' not in form or not form['pdf'].file:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': 'No PDF provided'}).encode('utf-8'))
+                return
+            pdf_bytes = form['pdf'].file.read()
             courses = []
             total_credits = None
             gpa = None
